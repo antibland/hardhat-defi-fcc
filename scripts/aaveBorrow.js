@@ -17,11 +17,63 @@ async function main() {
     // approve
     console.log("weth token addr", wethTokenAddress)
     await approveErc20(wethTokenAddress, lendingPool.address, AMOUNT, deployer)
-
     console.log("Depositing...")
     await lendingPool.deposit(wethTokenAddress, AMOUNT, deployer, 0)
-
     console.log("Deposited!")
+
+    let { availableBorrowsETH, totalDebtETH } = await getBorrowUserData(lendingPool, deployer)
+    const daiPrice = await getDaiPrice()
+    const amountDaiToBorrow = availableBorrowsETH.toString() * 0.95 * (1 / daiPrice.toNumber())
+    console.log(`You can borrow ${amountDaiToBorrow}`)
+    const amountDaiToBorrowWei = ethers.utils.parseEther(amountDaiToBorrow.toString())
+
+    // based off the value of ETH, what is the converted amount in DAI?
+    // Borrow
+    // how much we have borrowed, how much we have in collateral, how much we can borrow
+
+    const daiTokenAddress = networkConfig[network.config.chainId].daiToken
+    await borrowDai(daiTokenAddress, lendingPool, amountDaiToBorrowWei, deployer)
+    await getBorrowUserData(lendingPool, deployer)
+    await repay(amountDaiToBorrowWei, daiTokenAddress, lendingPool, deployer)
+    await getBorrowUserData(lendingPool, deployer)
+}
+
+/**
+ *
+ * function repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf)
+ */
+
+async function repay(amount, daiAddress, lendingPool, account) {
+    await approveErc20(daiAddress, lendingPool.address, amount, account)
+    const repayTx = await lendingPool.repay(daiAddress, amount, 1, account)
+    await repayTx.wait(1)
+    console.log(`You repaid!`)
+}
+
+async function borrowDai(daiAddress, lendingPool, amountDaiToBorrow, account) {
+    const borrowTx = await lendingPool.borrow(daiAddress, amountDaiToBorrow, 1, 0, account)
+    await borrowTx.wait(1)
+    console.log(`You borrowed!`)
+}
+
+async function getDaiPrice() {
+    // if we're only reading from the contract, we don't need a signer
+    const daiEthPriceFeed = await ethers.getContractAt(
+        "AggregatorV3Interface",
+        networkConfig[network.config.chainId].daiEthPriceFeed
+    )
+    const price = (await daiEthPriceFeed.latestRoundData())[1] // the answer
+    console.log(`The DAI/ETH price is ${price.toString()}`)
+    return price
+}
+
+async function getBorrowUserData(lendingPool, account) {
+    const { totalCollateralETH, totalDebtETH, availableBorrowsETH } =
+        await lendingPool.getUserAccountData(account)
+    console.log(`You have ${totalCollateralETH} worth of ETH deposited.`)
+    console.log(`You have ${totalDebtETH} worth of ETH borrowed.`)
+    console.log(`You can borrow ${availableBorrowsETH} worth of ETH.`)
+    return { availableBorrowsETH, totalDebtETH }
 }
 
 async function getLendingPool(account) {
